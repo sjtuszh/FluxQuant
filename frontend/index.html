@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FluxQuant Market Workspace</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>FluxQuant Market Workspace</h1>
+          <p>Build your own card layout for rates, commodities, FX, crypto, and comparison views.</p>
+        </div>
+        <div class="topbar-actions">
+          <span id="updatedAt" class="subtle"></span>
+          <button id="refreshButton" class="primary-button">Refresh</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar">
+          <section class="panel">
+            <h2>Workspace</h2>
+            <div class="field">
+              <span>Columns</span>
+              <div class="segmented" id="layoutModeGroup">
+                <button data-columns="1">1</button>
+                <button data-columns="2">2</button>
+                <button data-columns="3">3</button>
+              </div>
+            </div>
+            <div class="field">
+              <span>Auto refresh</span>
+              <div class="refresh-row">
+                <input id="refreshValue" type="number" min="0" value="5" />
+                <select id="refreshUnit">
+                  <option value="minute">minute</option>
+                  <option value="hour">hour</option>
+                </select>
+              </div>
+            </div>
+            <p class="subtle" id="statusText">Idle</p>
+          </section>
+
+          <section class="panel">
+            <h2>Add Card</h2>
+            <label class="field">
+              <span>Card type</span>
+              <select id="newCardType">
+                <option value="instrument">Instrument Card</option>
+                <option value="comparison">Comparison Card</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Instrument</span>
+              <select id="newCardInstrument"></select>
+            </label>
+            <button id="addCardButton" class="primary-button full-width">Add Card</button>
+          </section>
+
+          <section class="panel">
+            <h2>Available Instruments</h2>
+            <div id="instrumentCatalog" class="catalog-list"></div>
+          </section>
+        </aside>
+
+        <section class="content">
+          <div id="cardGrid" class="card-grid columns-2"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./pages/dashboard.js"></script>
+  </body>
+</html>
