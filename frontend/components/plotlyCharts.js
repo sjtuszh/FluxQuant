@@ -40,7 +40,7 @@ export function renderSeriesChart(container, series, title) {
 
   const layout = {
     title: { text: title, font: { size: 15 } },
-    margin: { l: 56, r: 20, t: 36, b: 52 },
+    margin: { l: 56, r: 20, t: 36, b: 72 },
     paper_bgcolor: "#ffffff",
     plot_bgcolor: "#ffffff",
     xaxis: commonXaxis(),
@@ -60,19 +60,28 @@ export function renderComparisonChart(container, seriesList, title) {
     type: "scatter",
     mode: "lines",
     line: { color: series.color, width: 2.5 },
-    name: `${series.label} x${series.multiplier.toExponential(2)}`,
+    name: series.legendLabel || series.label,
     hovertemplate: "%{customdata:.3f}<extra>" + series.label + "</extra>",
   }));
 
   const layout = {
     title: { text: title, font: { size: 15 } },
-    margin: { l: 56, r: 20, t: 36, b: 52 },
+    margin: { l: 56, r: 20, t: 124, b: 76 },
     paper_bgcolor: "#ffffff",
     plot_bgcolor: "#ffffff",
     xaxis: commonXaxis(),
     yaxis: { title: "Scaled Value", color: axisColor(), gridcolor: "#E6EDF5" },
     hovermode: "x unified",
-    legend: { orientation: "h", y: -0.2 },
+    legend: {
+      orientation: "h",
+      x: 0,
+      xanchor: "left",
+      y: 1.14,
+      yanchor: "bottom",
+      valign: "top",
+      itemwidth: 90,
+      traceorder: "normal",
+    },
   };
 
   Plotly.react(container, traces, layout, { responsive: true, displayModeBar: false });

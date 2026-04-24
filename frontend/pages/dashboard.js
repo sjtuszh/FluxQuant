@@ -22,6 +22,7 @@ let fullscreenCardId = null;
 const cardIntervals = ["1d", "1w", "1m", "1q"];
 const cardPeriods = ["5d", "1m", "1y", "3y", "5y", "10y", "20y"];
 const downloadRangeInput = document.getElementById("downloadRange");
+const fallbackSeriesColor = "#2563eb";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -227,7 +228,7 @@ async function addCard() {
   const card =
     cardType === "instrument"
       ? { id: crypto.randomUUID(), type: "instrument", instrumentId: newCardInstrumentInput.value, period: "1d", interval: "1d", referenceInstrumentId: "usd" }
-      : { id: crypto.randomUUID(), type: "comparison", instruments: [newCardInstrumentInput.value], period: "1d", interval: "1d", scales: {} };
+      : { id: crypto.randomUUID(), type: "comparison", instruments: [newCardInstrumentInput.value], period: "1d", interval: "1d", scales: {}, colors: {} };
 
   appState.cards.push(card);
   saveState();
@@ -293,6 +294,30 @@ function metricMarkup(series) {
 
 function multiplierFromExponent(scaleExp) {
   return Math.pow(10, Number(scaleExp || 0));
+}
+
+function getSeriesColor(card, instrumentId, index) {
+  const color = card?.colors?.[instrumentId];
+  return color || seriesColors[index % seriesColors.length] || fallbackSeriesColor;
+}
+
+function abbreviateInstrumentLabel(item) {
+  const map = {
+    ust_2y: "UST 2Y",
+    ust_10y: "UST 10Y",
+    ust_30y: "UST 30Y",
+    wti: "WTI",
+    brent: "Brent",
+    dxy: "DXY",
+    gold: "Gold",
+    cnhusd: "CNY",
+    jpyusd: "JPY",
+    eurusd: "EUR",
+    gbpusd: "GBP",
+    btcusd: "BTC",
+    usdtusd: "USDT",
+  };
+  return map[item.instrument_id] || item.symbol || item.label;
 }
 
 function autoScaleMap(items) {
@@ -546,12 +571,14 @@ async function refreshComparisonCard(card, article, preloadedItems = null) {
   }
 
   card.scales = card.scales || {};
+  card.colors = card.colors || {};
   const chartSeries = items.map((item, index) => {
     const scaleExp = Number(card.scales[item.instrument_id] ?? 0);
     const multiplier = multiplierFromExponent(scaleExp);
     return {
       ...item,
-      color: seriesColors[index % seriesColors.length],
+      color: getSeriesColor(card, item.instrument_id, index),
+      legendLabel: abbreviateInstrumentLabel(item),
       multiplier,
       scaleExp,
       history: item.history.map((row) => ({ date: row.date, rawValue: Number(row.value), scaledValue: Number(row.value) * multiplier })),
@@ -573,7 +600,11 @@ async function refreshComparisonCard(card, article, preloadedItems = null) {
             <span class="subtle">${series.unit}</span>
           </div>
           <div class="scale-row">
-            <input type="range" min="-8" max="8" step="0.1" value="${series.scaleExp}" />
+            <label class="series-color-row">
+              <span class="subtle">Color</span>
+              <input class="series-color-input" type="color" value="${series.color}" />
+            </label>
+            <input class="series-scale-input" type="range" min="-8" max="8" step="0.1" value="${series.scaleExp}" />
             <span>x${series.multiplier.toExponential(2)}</span>
           </div>
         </div>
@@ -583,9 +614,15 @@ async function refreshComparisonCard(card, article, preloadedItems = null) {
 
   Array.from(seriesListHost.querySelectorAll(".series-item")).forEach((node) => {
     const instrumentId = node.dataset.seriesId;
-    const slider = node.querySelector("input");
+    const slider = node.querySelector(".series-scale-input");
+    const colorInput = node.querySelector(".series-color-input");
     slider.addEventListener("input", () => {
       card.scales[instrumentId] = Number(slider.value);
+      saveState();
+      refreshComparisonCard(card, article, items);
+    });
+    colorInput.addEventListener("input", () => {
+      card.colors[instrumentId] = colorInput.value;
       saveState();
       refreshComparisonCard(card, article, items);
     });
