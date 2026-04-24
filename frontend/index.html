@@ -65,7 +65,13 @@
               <h2>Available Instruments</h2>
               <div class="panel-actions">
                 <button id="scanButton" class="secondary-button">Scan Local</button>
-                <button id="refreshButton" class="primary-button">Download All 5Y</button>
+                <select id="downloadRange">
+                  <option value="1y">1Y</option>
+                  <option value="5y" selected>5Y</option>
+                  <option value="10y">10Y</option>
+                  <option value="20y">20Y</option>
+                </select>
+                <button id="refreshButton" class="primary-button">Download All</button>
               </div>
             </div>
             <div id="instrumentCatalog" class="catalog-list"></div>

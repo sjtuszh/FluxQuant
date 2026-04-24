@@ -1,5 +1,5 @@
 import { renderTable } from "../components/dataTable.js";
-import { renderComparisonChart, renderSeriesChart } from "../components/plotlyCharts.js";
+import { renderComparisonChart, renderSeriesChart, shiftPlotWindow } from "../components/plotlyCharts.js";
 import { fetchBatch, fetchCatalog, fetchSeries, fetchSettings, syncBatch, syncSeries } from "../services/marketApi.js";
 import { appState, loadState, saveState } from "../store/appState.js";
 
@@ -20,7 +20,8 @@ const seriesColors = ["#2563eb", "#0f9f6e", "#c77800", "#c53d43", "#7c3aed", "#0
 const cardElements = new Map();
 let fullscreenCardId = null;
 const cardIntervals = ["1d", "1w", "1m", "1q"];
-const cardPeriods = ["5d", "1m", "1y", "3y", "5y"];
+const cardPeriods = ["5d", "1m", "1y", "3y", "5y", "10y", "20y"];
+const downloadRangeInput = document.getElementById("downloadRange");
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -175,7 +176,7 @@ function setRefreshQueueButton() {
   if (!refreshButton) return;
   refreshButton.disabled = false;
   refreshButton.classList.toggle("is-loading", appState.refreshQueueRunning);
-  refreshButton.textContent = appState.refreshQueueRunning ? "Pause Download" : "Download All 5Y";
+  refreshButton.textContent = appState.refreshQueueRunning ? "Pause Download" : "Download All";
 }
 
 function setScanButtonLoading(loading) {
@@ -356,6 +357,10 @@ function createInstrumentCard(card) {
         </label>
       </div>
       <div class="metric-row"></div>
+      <div class="chart-toolbar">
+        <button class="secondary-button chart-pan-left" type="button">Left</button>
+        <button class="secondary-button chart-pan-right" type="button">Right</button>
+      </div>
       <div class="chart-host"></div>
       <div class="chart-note"></div>
       <div class="table-host"></div>
@@ -389,6 +394,8 @@ function createInstrumentCard(card) {
     saveState();
     refreshCard(card.id, false);
   });
+  article.querySelector(".chart-pan-left").addEventListener("click", () => shiftPlotWindow(article.querySelector(".chart-host"), -1));
+  article.querySelector(".chart-pan-right").addEventListener("click", () => shiftPlotWindow(article.querySelector(".chart-host"), 1));
 
   return article;
 }
@@ -416,6 +423,10 @@ function createComparisonCard(card) {
         <summary>Select instruments</summary>
         <div class="check-list comparison-selector"></div>
       </details>
+      <div class="chart-toolbar">
+        <button class="secondary-button chart-pan-left" type="button">Left</button>
+        <button class="secondary-button chart-pan-right" type="button">Right</button>
+      </div>
       <div class="chart-host"></div>
       <div class="series-list"></div>
     `
@@ -460,6 +471,8 @@ function createComparisonCard(card) {
       setButtonLoading(button, false, "Auto fit");
     }
   });
+  article.querySelector(".chart-pan-left").addEventListener("click", () => shiftPlotWindow(article.querySelector(".chart-host"), -1));
+  article.querySelector(".chart-pan-right").addEventListener("click", () => shiftPlotWindow(article.querySelector(".chart-host"), 1));
 
   return article;
 }
@@ -484,10 +497,6 @@ function renderCatalog() {
           <div class="title">${escapeHtml(item.label)}</div>
           <div class="meta">${escapeHtml(item.category)} | ${escapeHtml(item.unit)}</div>
           <div class="status">${escapeHtml(downloadState.message || "No local data yet.")}</div>
-          <div class="catalog-actions">
-            <button class="secondary-button catalog-scan" type="button">Scan Local</button>
-            <button class="primary-button catalog-download" type="button">Download 5Y</button>
-          </div>
           <div class="catalog-progress"><div class="catalog-progress-bar" style="width:${progress}%"></div></div>
         </div>
       `;
@@ -495,8 +504,7 @@ function renderCatalog() {
     .join("");
   newCardInstrumentInput.innerHTML = appState.catalog.map((item) => `<option value="${item.instrument_id}">${item.label}</option>`).join("");
   Array.from(instrumentCatalog.querySelectorAll(".catalog-item")).forEach((node) => {
-    node.querySelector(".catalog-scan").addEventListener("click", () => scanCatalogInstrument(node.dataset.instrumentId));
-    node.querySelector(".catalog-download").addEventListener("click", () => syncCatalogInstrument(node.dataset.instrumentId));
+    node.addEventListener("click", () => syncCatalogInstrument(node.dataset.instrumentId));
   });
 }
 
@@ -507,14 +515,13 @@ function rebuildWorkspace() {
 }
 
 async function refreshInstrumentCard(card, article) {
-  const syncResult = await syncSeries({ instrumentId: card.instrumentId, period: "5y", interval: "1d" });
   const baseSeries = await fetchSeries({ instrumentId: card.instrumentId, period: card.period, interval: card.interval || "1d" });
   const referenceSeries = await fetchReferenceSeries(card.referenceInstrumentId, card.period);
   const series = applyReferenceSeries(baseSeries, referenceSeries);
   article.querySelector(".metric-row").innerHTML = metricMarkup(series);
   renderSeriesChart(article.querySelector(".chart-host"), series, `${series.label} chart`);
   const referenceLabel = card.referenceInstrumentId === "usd" ? "USD" : getInstrumentMeta(card.referenceInstrumentId)?.label || card.referenceInstrumentId;
-  article.querySelector(".chart-note").textContent = `${series.source} | ${syncResult.message} | priced in ${referenceLabel}`;
+  article.querySelector(".chart-note").textContent = `${series.source} | priced in ${referenceLabel}`;
   renderTable(article.querySelector(".table-host"), baseSeries.table, instrumentColumns(baseSeries));
   updatedAt.textContent = `Last refresh: ${new Date(baseSeries.updated_at).toLocaleString()}`;
 }
@@ -528,9 +535,7 @@ async function refreshComparisonCard(card, article, preloadedItems = null) {
     return;
   }
 
-  const syncInfo =
-    preloadedItems ||
-    (await syncBatch({ instrumentIds: card.instruments || [], period: "5y", interval: "1d" })).items;
+  const syncInfo = preloadedItems || [];
   const rawItems = (await fetchBatch({ instrumentIds: card.instruments || [], period: card.period, interval: card.interval || "1d" })).items;
   const items = (rawItems || []).filter((item) => !item.error);
   const failedItems = (rawItems || []).filter((item) => item.error);
@@ -626,7 +631,7 @@ async function syncCatalogInstrument(instrumentId) {
   setDownloadState(instrumentId, { status: "loading", progress: 18, message: "Preparing download..." });
 
   try {
-    const period = "5y";
+    const period = appState.downloadRange || "5y";
     setDownloadState(instrumentId, { progress: 52, message: "Downloading latest market data..." });
     const result = await syncSeries({ instrumentId, period, interval: "1d" });
     updateCatalogRange(
@@ -762,6 +767,11 @@ async function boot() {
     appState.refreshUnit = refreshUnitInput.value;
     updateAutoRefresh();
   });
+  downloadRangeInput.value = appState.downloadRange || "5y";
+  downloadRangeInput.addEventListener("change", () => {
+    appState.downloadRange = downloadRangeInput.value;
+    saveState();
+  });
   addCardButton.addEventListener("click", addCard);
   refreshButton.addEventListener("click", () => refreshAllCards(true));
   scanButton.addEventListener("click", scanAllCatalogInstruments);
@@ -769,7 +779,9 @@ async function boot() {
   setScanButtonLoading(false);
 
   updateAutoRefresh();
-  await refreshAllCards(false);
+  for (const card of appState.cards) {
+    await refreshCard(card.id, false);
+  }
 }
 
 boot();

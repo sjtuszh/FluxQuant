@@ -23,20 +23,20 @@ class MacroFetcher:
         "ust_2y": {"kind": "treasury", "label": "US Treasury 2Y", "unit": "%", "category": "Rates", "tenor": "2 Yr", "symbol": "UST"},
         "ust_10y": {"kind": "treasury", "label": "US Treasury 10Y", "unit": "%", "category": "Rates", "tenor": "10 Yr", "symbol": "UST"},
         "ust_30y": {"kind": "treasury", "label": "US Treasury 30Y", "unit": "%", "category": "Rates", "tenor": "30 Yr", "symbol": "UST"},
-        "wti": {"kind": "yahoo", "label": "WTI Crude Oil", "unit": "USD", "category": "Energy", "symbol": "CL=F", "bootstrap_period": "5y"},
-        "brent": {"kind": "yahoo", "label": "Brent Crude Oil", "unit": "USD", "category": "Energy", "symbol": "BZ=F", "bootstrap_period": "5y"},
-        "dxy": {"kind": "yahoo", "label": "US Dollar Index", "unit": "Index", "category": "Macro", "symbol": "DX-Y.NYB", "bootstrap_period": "5y"},
-        "gold": {"kind": "yahoo", "label": "Gold", "unit": "USD", "category": "Macro", "symbol": "GC=F", "bootstrap_period": "5y"},
-        "cnhusd": {"kind": "yahoo", "label": "Chinese Yuan", "unit": "USD", "category": "FX", "symbol": "CNY=X", "bootstrap_period": "5y"},
-        "jpyusd": {"kind": "yahoo", "label": "Japanese Yen", "unit": "USD", "category": "FX", "symbol": "JPY=X", "bootstrap_period": "5y"},
-        "eurusd": {"kind": "yahoo", "label": "Euro", "unit": "USD", "category": "FX", "symbol": "EURUSD=X", "bootstrap_period": "5y"},
-        "gbpusd": {"kind": "yahoo", "label": "British Pound", "unit": "USD", "category": "FX", "symbol": "GBPUSD=X", "bootstrap_period": "5y"},
-        "btcusd": {"kind": "yahoo", "label": "Bitcoin", "unit": "USD", "category": "Crypto", "symbol": "BTC-USD", "bootstrap_period": "5y"},
-        "usdtusd": {"kind": "yahoo", "label": "USDT", "unit": "USD", "category": "Crypto", "symbol": "USDT-USD", "bootstrap_period": "5y"},
+        "wti": {"kind": "yahoo", "label": "WTI Crude Oil", "unit": "USD", "category": "Energy", "symbol": "CL=F", "bootstrap_period": "20y"},
+        "brent": {"kind": "yahoo", "label": "Brent Crude Oil", "unit": "USD", "category": "Energy", "symbol": "BZ=F", "bootstrap_period": "20y"},
+        "dxy": {"kind": "yahoo", "label": "US Dollar Index", "unit": "Index", "category": "Macro", "symbol": "DX-Y.NYB", "bootstrap_period": "20y"},
+        "gold": {"kind": "yahoo", "label": "Gold", "unit": "USD", "category": "Macro", "symbol": "GC=F", "bootstrap_period": "20y"},
+        "cnhusd": {"kind": "yahoo", "label": "Chinese Yuan", "unit": "USD", "category": "FX", "symbol": "CNY=X", "bootstrap_period": "20y"},
+        "jpyusd": {"kind": "yahoo", "label": "Japanese Yen", "unit": "USD", "category": "FX", "symbol": "JPY=X", "bootstrap_period": "20y"},
+        "eurusd": {"kind": "yahoo", "label": "Euro", "unit": "USD", "category": "FX", "symbol": "EURUSD=X", "bootstrap_period": "20y"},
+        "gbpusd": {"kind": "yahoo", "label": "British Pound", "unit": "USD", "category": "FX", "symbol": "GBPUSD=X", "bootstrap_period": "20y"},
+        "btcusd": {"kind": "yahoo", "label": "Bitcoin", "unit": "USD", "category": "Crypto", "symbol": "BTC-USD", "bootstrap_period": "20y"},
+        "usdtusd": {"kind": "yahoo", "label": "USDT", "unit": "USD", "category": "Crypto", "symbol": "USDT-USD", "bootstrap_period": "20y"},
     }
 
-    range_days = {"5d": 5, "1m": 31, "1y": 366, "3y": 366 * 3, "5y": 366 * 5}
-    period_order = {"5d": 0, "1m": 1, "1y": 2, "3y": 3, "5y": 4}
+    range_days = {"5d": 5, "1m": 31, "1y": 366, "3y": 366 * 3, "5y": 366 * 5, "10y": 366 * 10, "20y": 366 * 20}
+    period_order = {"5d": 0, "1m": 1, "1y": 2, "3y": 3, "5y": 4, "10y": 5, "20y": 6}
 
     def __init__(self) -> None:
         self.repository = MarketDataRepository()
@@ -47,21 +47,23 @@ class MacroFetcher:
             item = dict(config)
             time_range = self.repository.get_timestamp_range(instrument_id)
             item["instrument_id"] = instrument_id
-            item["period_options"] = ["5d", "1m", "1y", "3y", "5y"]
+            item["period_options"] = ["5d", "1m", "1y", "3y", "5y", "10y", "20y"]
             item["interval_options"] = ["1d", "1w", "1m", "1q"]
             item["earliest_local_timestamp"] = time_range["earliest_timestamp"]
             item["latest_local_timestamp"] = time_range["latest_timestamp"]
             items.append(item)
         return {"items": items}
 
-    def sync_instrument(self, instrument_id: str, period: str = "5y", interval: str = "1d") -> Dict[str, Any]:
+    def sync_instrument(self, instrument_id: str, period: str = "20y", interval: str = "1d") -> Dict[str, Any]:
         config = self._get_instrument(instrument_id)
-        latest_local = self.repository.get_latest_timestamp(instrument_id)
+        time_range_before = self.repository.get_timestamp_range(instrument_id)
+        earliest_local = time_range_before["earliest_timestamp"]
+        latest_local = time_range_before["latest_timestamp"]
 
         if config["kind"] == "treasury":
             inserted = self._sync_treasury(instrument_id, config)
         else:
-            inserted = self._sync_yahoo(instrument_id, config, period, interval, latest_local)
+            inserted = self._sync_yahoo(instrument_id, config, period, interval, earliest_local, latest_local)
 
         latest_after = self.repository.get_latest_timestamp(instrument_id)
         time_range = self.repository.get_timestamp_range(instrument_id)
@@ -74,7 +76,7 @@ class MacroFetcher:
             "message": "New data saved." if inserted > 0 else "Already up to date.",
         }
 
-    def sync_batch(self, instrument_ids: List[str], period: str = "5y", interval: str = "1d") -> Dict[str, Any]:
+    def sync_batch(self, instrument_ids: List[str], period: str = "20y", interval: str = "1d") -> Dict[str, Any]:
         results = []
         for instrument_id in instrument_ids:
             try:
@@ -179,8 +181,16 @@ class MacroFetcher:
                 )
         return self.repository.upsert_points(rows)
 
-    def _sync_yahoo(self, instrument_id: str, config: Dict[str, str], period: str, interval: str, latest_local: Optional[str]) -> int:
-        effective_period = self._period_for_incremental_sync(config, period, interval, latest_local)
+    def _sync_yahoo(
+        self,
+        instrument_id: str,
+        config: Dict[str, str],
+        period: str,
+        interval: str,
+        earliest_local: Optional[str],
+        latest_local: Optional[str],
+    ) -> int:
+        effective_period = self._period_for_incremental_sync(config, period, interval, earliest_local, latest_local)
         payload = self._fetch_yahoo_payload(symbol=config["symbol"], period=effective_period, interval=interval)
         result = payload.get("chart", {}).get("result", [])
         if not result:
@@ -193,7 +203,7 @@ class MacroFetcher:
         for index, timestamp in enumerate(timestamps):
             observed_at = datetime.utcfromtimestamp(timestamp)
             iso_time = observed_at.strftime("%Y-%m-%dT%H:%M:%S")
-            if latest_local and iso_time <= latest_local:
+            if earliest_local and latest_local and earliest_local <= iso_time <= latest_local:
                 continue
             close_value = quote.get("close", [None])[index]
             if close_value is None:
@@ -218,18 +228,35 @@ class MacroFetcher:
             )
         return self.repository.upsert_points(rows)
 
-    def _period_for_incremental_sync(self, config: Dict[str, str], period: str, interval: str, latest_local: Optional[str]) -> str:
-        if not latest_local:
-            return self._max_period(period, config.get("bootstrap_period", period))
-        try:
-            last_dt = datetime.fromisoformat(latest_local)
-        except ValueError:
-            return self._max_period(period, config.get("bootstrap_period", period))
+    def _period_for_incremental_sync(
+        self,
+        config: Dict[str, str],
+        period: str,
+        interval: str,
+        earliest_local: Optional[str],
+        latest_local: Optional[str],
+    ) -> str:
+        requested_period = self._max_period(period, config.get("bootstrap_period", period))
+        requested_days = self.range_days.get(requested_period)
+        if not requested_days:
+            return requested_period
+        if not earliest_local or not latest_local:
+            return requested_period
 
-        age_days = max((datetime.utcnow() - last_dt).days + 2, 2)
-        if age_days <= 366:
-            return "1y"
-        return "5y"
+        try:
+            earliest_dt = datetime.fromisoformat(earliest_local)
+            latest_dt = datetime.fromisoformat(latest_local)
+        except ValueError:
+            return requested_period
+
+        now = datetime.utcnow()
+        desired_start = now - pd.Timedelta(days=requested_days)
+        local_covers_start = earliest_dt <= desired_start
+        local_is_fresh = (now - latest_dt).days <= 2
+
+        if local_covers_start and local_is_fresh:
+            return "1y" if requested_days <= 366 else requested_period
+        return requested_period
 
     def _max_period(self, left: str, right: str) -> str:
         left_rank = self.period_order.get(left, 0)
@@ -286,7 +313,7 @@ class MacroFetcher:
         frame["date"] = pd.to_datetime(frame["date"])
         frame["value"] = frame["value"].astype(float)
         frame = frame.set_index("date")
-        rule_map = {"1w": "W-FRI", "1m": "ME", "1q": "QE"}
+        rule_map = {"1w": "W-FRI", "1m": "M", "1q": "Q"}
         rule = rule_map.get(period)
         if not rule:
             return history
