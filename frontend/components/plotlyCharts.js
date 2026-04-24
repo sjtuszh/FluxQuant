@@ -36,7 +36,7 @@ export function renderComparisonChart(container, seriesList, title) {
     mode: "lines",
     line: { color: series.color, width: 2.5 },
     name: `${series.label} x${series.multiplier.toExponential(2)}`,
-    hovertemplate: "%{x}<br>Scaled: %{y:.3f}<br>Raw: %{customdata:.3f}<extra>" + series.label + "</extra>",
+    hovertemplate: "%{customdata:.3f}<extra>" + series.label + "</extra>",
   }));
 
   const layout = {
@@ -44,7 +44,7 @@ export function renderComparisonChart(container, seriesList, title) {
     margin: { l: 56, r: 20, t: 36, b: 52 },
     paper_bgcolor: "#ffffff",
     plot_bgcolor: "#ffffff",
-    xaxis: { title: "Time", color: axisColor(), gridcolor: "#E6EDF5" },
+    xaxis: { title: "Time", color: axisColor(), gridcolor: "#E6EDF5", unifiedhovertitle: { text: "%{x}" } },
     yaxis: { title: "Scaled Value", color: axisColor(), gridcolor: "#E6EDF5" },
     hovermode: "x unified",
     legend: { orientation: "h", y: -0.2 },

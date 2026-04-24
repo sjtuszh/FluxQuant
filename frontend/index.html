@@ -16,7 +16,6 @@
         </div>
         <div class="topbar-actions">
           <span id="updatedAt" class="subtle"></span>
-          <button id="refreshButton" class="primary-button">Refresh</button>
         </div>
       </header>
 
@@ -62,7 +61,13 @@
           </section>
 
           <section class="panel">
-            <h2>Available Instruments</h2>
+            <div class="panel-header">
+              <h2>Available Instruments</h2>
+              <div class="panel-actions">
+                <button id="scanButton" class="secondary-button">Scan Local</button>
+                <button id="refreshButton" class="primary-button">Download All 5Y</button>
+              </div>
+            </div>
             <div id="instrumentCatalog" class="catalog-list"></div>
           </section>
         </aside>

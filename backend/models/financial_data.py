@@ -29,3 +29,8 @@ CREATE TABLE IF NOT EXISTS financial_data (
     created_at TEXT NOT NULL
 );
 """
+
+CREATE_FINANCIAL_DATA_INDEX_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_data_unique
+ON financial_data (data_type, observation_time);
+"""
