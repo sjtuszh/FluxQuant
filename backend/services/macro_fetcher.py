@@ -14,6 +14,8 @@ from backend.database.market_repository import MarketDataRepository
 class MacroFetcher:
     """Local-first market service backed by sqlite3."""
 
+    write_chunk_size = 250
+
     treasury_historical_url = (
         "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
         "daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve&field_tdr_date_value={year}&page&_format=csv"
@@ -23,16 +25,16 @@ class MacroFetcher:
         "ust_2y": {"kind": "treasury", "label": "US Treasury 2Y", "unit": "%", "category": "Rates", "tenor": "2 Yr", "symbol": "UST"},
         "ust_10y": {"kind": "treasury", "label": "US Treasury 10Y", "unit": "%", "category": "Rates", "tenor": "10 Yr", "symbol": "UST"},
         "ust_30y": {"kind": "treasury", "label": "US Treasury 30Y", "unit": "%", "category": "Rates", "tenor": "30 Yr", "symbol": "UST"},
-        "wti": {"kind": "yahoo", "label": "WTI Crude Oil", "unit": "USD", "category": "Energy", "symbol": "CL=F", "bootstrap_period": "20y"},
-        "brent": {"kind": "yahoo", "label": "Brent Crude Oil", "unit": "USD", "category": "Energy", "symbol": "BZ=F", "bootstrap_period": "20y"},
-        "dxy": {"kind": "yahoo", "label": "US Dollar Index", "unit": "Index", "category": "Macro", "symbol": "DX-Y.NYB", "bootstrap_period": "20y"},
-        "gold": {"kind": "yahoo", "label": "Gold", "unit": "USD", "category": "Macro", "symbol": "GC=F", "bootstrap_period": "20y"},
-        "cnhusd": {"kind": "yahoo", "label": "Chinese Yuan", "unit": "USD", "category": "FX", "symbol": "CNY=X", "bootstrap_period": "20y"},
-        "jpyusd": {"kind": "yahoo", "label": "Japanese Yen", "unit": "USD", "category": "FX", "symbol": "JPY=X", "bootstrap_period": "20y"},
-        "eurusd": {"kind": "yahoo", "label": "Euro", "unit": "USD", "category": "FX", "symbol": "EURUSD=X", "bootstrap_period": "20y"},
-        "gbpusd": {"kind": "yahoo", "label": "British Pound", "unit": "USD", "category": "FX", "symbol": "GBPUSD=X", "bootstrap_period": "20y"},
-        "btcusd": {"kind": "yahoo", "label": "Bitcoin", "unit": "USD", "category": "Crypto", "symbol": "BTC-USD", "bootstrap_period": "20y"},
-        "usdtusd": {"kind": "yahoo", "label": "USDT", "unit": "USD", "category": "Crypto", "symbol": "USDT-USD", "bootstrap_period": "20y"},
+        "wti": {"kind": "yahoo", "label": "WTI Crude Oil", "unit": "USD", "category": "Energy", "symbol": "CL=F"},
+        "brent": {"kind": "yahoo", "label": "Brent Crude Oil", "unit": "USD", "category": "Energy", "symbol": "BZ=F"},
+        "dxy": {"kind": "yahoo", "label": "US Dollar Index", "unit": "Index", "category": "Macro", "symbol": "DX-Y.NYB"},
+        "gold": {"kind": "yahoo", "label": "Gold", "unit": "USD", "category": "Macro", "symbol": "GC=F"},
+        "cnhusd": {"kind": "yahoo", "label": "Chinese Yuan", "unit": "USD", "category": "FX", "symbol": "CNY=X"},
+        "jpyusd": {"kind": "yahoo", "label": "Japanese Yen", "unit": "USD", "category": "FX", "symbol": "JPY=X"},
+        "eurusd": {"kind": "yahoo", "label": "Euro", "unit": "USD", "category": "FX", "symbol": "EURUSD=X"},
+        "gbpusd": {"kind": "yahoo", "label": "British Pound", "unit": "USD", "category": "FX", "symbol": "GBPUSD=X"},
+        "btcusd": {"kind": "yahoo", "label": "Bitcoin", "unit": "USD", "category": "Crypto", "symbol": "BTC-USD"},
+        "usdtusd": {"kind": "yahoo", "label": "USDT", "unit": "USD", "category": "Crypto", "symbol": "USDT-USD"},
     }
 
     range_days = {"5d": 5, "1m": 31, "1y": 366, "3y": 366 * 3, "5y": 366 * 5, "10y": 366 * 10, "20y": 366 * 20}
@@ -61,7 +63,7 @@ class MacroFetcher:
         latest_local = time_range_before["latest_timestamp"]
 
         if config["kind"] == "treasury":
-            inserted = self._sync_treasury(instrument_id, config)
+            inserted = self._sync_treasury(instrument_id, config, period)
         else:
             inserted = self._sync_yahoo(instrument_id, config, period, interval, earliest_local, latest_local)
 
@@ -157,29 +159,50 @@ class MacroFetcher:
                 items.append({"instrument_id": instrument_id, "label": instrument_id, "error": str(exc)})
         return {"updated_at": datetime.utcnow().isoformat(), "items": items}
 
-    def _sync_treasury(self, instrument_id: str, config: Dict[str, str]) -> int:
+    def _sync_treasury(self, instrument_id: str, config: Dict[str, str], period: str) -> int:
         now = datetime.utcnow()
-        years = {now.year - offset for offset in range(6)}
-        rows = []
-        for year in years:
-            frame = pd.read_csv(self.treasury_historical_url.format(year=year))
-            frame.columns = [column.strip() for column in frame.columns]
-            frame["Date"] = pd.to_datetime(frame["Date"])
-            tenor = config["tenor"]
-            if tenor not in frame.columns:
+        years_back = self._years_back_for_period(period)
+        years = {now.year - offset for offset in range(years_back + 1)}
+        inserted = 0
+        rows: List[Dict[str, Any]] = []
+        tenor = config["tenor"]
+        for year in sorted(years):
+            try:
+                frame = pd.read_csv(self.treasury_historical_url.format(year=year))
+            except Exception:
                 continue
+
+            frame.columns = [column.strip() for column in frame.columns]
+            if "Date" not in frame.columns or tenor not in frame.columns:
+                continue
+
+            frame["Date"] = pd.to_datetime(frame["Date"])
+            frame = frame.sort_values("Date")
             for _, item in frame.iterrows():
-                rows.append(
-                    {
-                        "source": "U.S. Treasury",
-                        "symbol": config["symbol"],
-                        "data_type": instrument_id,
-                        "observation_time": item["Date"].strftime("%Y-%m-%dT00:00:00"),
-                        "value": float(item[tenor]),
-                        "payload": {"Date": item["Date"].strftime("%Y-%m-%d"), tenor: float(item[tenor])},
-                    }
-                )
-        return self.repository.upsert_points(rows)
+                try:
+                    tenor_value = item[tenor]
+                    if pd.isna(tenor_value):
+                        continue
+                    rows.append(
+                        {
+                            "source": "U.S. Treasury",
+                            "symbol": config["symbol"],
+                            "data_type": instrument_id,
+                            "observation_time": item["Date"].strftime("%Y-%m-%dT00:00:00"),
+                            "value": float(tenor_value),
+                            "payload": {"Date": item["Date"].strftime("%Y-%m-%d"), tenor: float(tenor_value)},
+                        }
+                    )
+                except Exception:
+                    continue
+
+                if len(rows) >= self.write_chunk_size:
+                    inserted += self.repository.upsert_points(rows)
+                    rows = []
+
+        if rows:
+            inserted += self.repository.upsert_points(rows)
+        return inserted
 
     def _sync_yahoo(
         self,
@@ -190,7 +213,7 @@ class MacroFetcher:
         earliest_local: Optional[str],
         latest_local: Optional[str],
     ) -> int:
-        effective_period = self._period_for_incremental_sync(config, period, interval, earliest_local, latest_local)
+        effective_period = self._period_for_incremental_sync(period, earliest_local, latest_local)
         payload = self._fetch_yahoo_payload(symbol=config["symbol"], period=effective_period, interval=interval)
         result = payload.get("chart", {}).get("result", [])
         if not result:
@@ -199,44 +222,53 @@ class MacroFetcher:
         series = result[0]
         timestamps = series.get("timestamp", [])
         quote = series.get("indicators", {}).get("quote", [{}])[0]
-        rows = []
+        rows: List[Dict[str, Any]] = []
+        inserted = 0
         for index, timestamp in enumerate(timestamps):
-            observed_at = datetime.utcfromtimestamp(timestamp)
-            iso_time = observed_at.strftime("%Y-%m-%dT%H:%M:%S")
-            if earliest_local and latest_local and earliest_local <= iso_time <= latest_local:
-                continue
-            close_value = quote.get("close", [None])[index]
-            if close_value is None:
-                continue
-            payload_row = {
-                "Date": observed_at.strftime("%Y-%m-%d %H:%M"),
-                "Open": self._safe_list_value(quote.get("open", []), index),
-                "High": self._safe_list_value(quote.get("high", []), index),
-                "Low": self._safe_list_value(quote.get("low", []), index),
-                "Close": close_value,
-                "Volume": self._safe_list_value(quote.get("volume", []), index, 0),
-            }
-            rows.append(
-                {
-                    "source": "Yahoo Finance",
-                    "symbol": config["symbol"],
-                    "data_type": instrument_id,
-                    "observation_time": iso_time,
-                    "value": float(close_value),
-                    "payload": payload_row,
+            try:
+                observed_at = datetime.utcfromtimestamp(timestamp)
+                iso_time = observed_at.strftime("%Y-%m-%dT%H:%M:%S")
+                if earliest_local and latest_local and earliest_local <= iso_time <= latest_local:
+                    continue
+                close_value = quote.get("close", [None])[index]
+                if close_value is None:
+                    continue
+                payload_row = {
+                    "Date": observed_at.strftime("%Y-%m-%d %H:%M"),
+                    "Open": self._safe_list_value(quote.get("open", []), index),
+                    "High": self._safe_list_value(quote.get("high", []), index),
+                    "Low": self._safe_list_value(quote.get("low", []), index),
+                    "Close": close_value,
+                    "Volume": self._safe_list_value(quote.get("volume", []), index, 0),
                 }
-            )
-        return self.repository.upsert_points(rows)
+                rows.append(
+                    {
+                        "source": "Yahoo Finance",
+                        "symbol": config["symbol"],
+                        "data_type": instrument_id,
+                        "observation_time": iso_time,
+                        "value": float(close_value),
+                        "payload": payload_row,
+                    }
+                )
+            except Exception:
+                continue
+
+            if len(rows) >= self.write_chunk_size:
+                inserted += self.repository.upsert_points(rows)
+                rows = []
+
+        if rows:
+            inserted += self.repository.upsert_points(rows)
+        return inserted
 
     def _period_for_incremental_sync(
         self,
-        config: Dict[str, str],
         period: str,
-        interval: str,
         earliest_local: Optional[str],
         latest_local: Optional[str],
     ) -> str:
-        requested_period = self._max_period(period, config.get("bootstrap_period", period))
+        requested_period = period
         requested_days = self.range_days.get(requested_period)
         if not requested_days:
             return requested_period
@@ -258,10 +290,9 @@ class MacroFetcher:
             return "1y" if requested_days <= 366 else requested_period
         return requested_period
 
-    def _max_period(self, left: str, right: str) -> str:
-        left_rank = self.period_order.get(left, 0)
-        right_rank = self.period_order.get(right, 0)
-        return left if left_rank >= right_rank else right
+    def _years_back_for_period(self, period: str) -> int:
+        period_map = {"1y": 1, "5y": 5, "10y": 10, "20y": 20}
+        return period_map.get(period, 20)
 
     def _fetch_yahoo_payload(self, symbol: str, period: str, interval: str) -> Dict[str, Any]:
         attempts = [(period, "1d")]
@@ -336,7 +367,9 @@ class MacroFetcher:
         )
         frame = frame.sort_values("date").drop_duplicates(subset=["date"], keep="last").set_index("date")
 
-        full_index = pd.date_range(start=frame.index.min(), end=frame.index.max(), freq="D")
+        today = pd.Timestamp.utcnow().tz_localize(None).normalize()
+        end_date = max(frame.index.max(), today)
+        full_index = pd.date_range(start=frame.index.min(), end=end_date, freq="D")
         frame = frame.reindex(full_index).ffill().dropna().reset_index()
         frame.columns = ["date", "value"]
         frame["date"] = frame["date"].dt.strftime("%Y-%m-%d")

@@ -93,6 +93,8 @@ class MarketDataRepository:
 
     def get_series(self, data_type: str, days: int) -> List[Dict[str, Any]]:
         self._ensure_schema()
+        if days <= 0:
+            return self.get_all_series(data_type)
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
         connection = get_connection()
         try:
@@ -104,6 +106,23 @@ class MarketDataRepository:
                 ORDER BY observation_time ASC
                 """,
                 (data_type, cutoff),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            connection.close()
+
+    def get_all_series(self, data_type: str) -> List[Dict[str, Any]]:
+        self._ensure_schema()
+        connection = get_connection()
+        try:
+            rows = connection.execute(
+                """
+                SELECT symbol, data_type, observation_time, value, payload_json
+                FROM financial_data
+                WHERE data_type = ?
+                ORDER BY observation_time ASC
+                """,
+                (data_type,),
             ).fetchall()
             return [dict(row) for row in rows]
         finally:
