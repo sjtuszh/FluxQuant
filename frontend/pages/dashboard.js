@@ -23,6 +23,7 @@ const cardIntervals = ["1d", "1w", "1m", "1q"];
 const cardPeriods = ["5d", "1m", "1y", "3y", "5y", "10y", "20y"];
 const downloadRangeInput = document.getElementById("downloadRange");
 const fallbackSeriesColor = "#2563eb";
+let draggingCardId = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -191,6 +192,84 @@ function setCardLoading(article, loading) {
   article.classList.toggle("is-loading", loading);
 }
 
+function moveCard(cardId, targetCardId, position = "before") {
+  if (!cardId || !targetCardId || cardId === targetCardId) return;
+  const sourceIndex = appState.cards.findIndex((card) => card.id === cardId);
+  const targetIndex = appState.cards.findIndex((card) => card.id === targetCardId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+
+  const [movedCard] = appState.cards.splice(sourceIndex, 1);
+  const adjustedTargetIndex = appState.cards.findIndex((card) => card.id === targetCardId);
+  const insertIndex = position === "after" ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+  appState.cards.splice(insertIndex, 0, movedCard);
+  saveState();
+}
+
+function clearDragState() {
+  draggingCardId = null;
+  Array.from(cardGrid.querySelectorAll(".card")).forEach((cardNode) => {
+    cardNode.classList.remove("dragging", "drag-over-before", "drag-over-after");
+  });
+}
+
+function reorderCardDom(cardId, targetCardId, position = "before") {
+  const movingNode = cardElements.get(cardId);
+  const targetNode = cardElements.get(targetCardId);
+  if (!movingNode || !targetNode || movingNode === targetNode) return;
+
+  if (position === "after") {
+    targetNode.insertAdjacentElement("afterend", movingNode);
+  } else {
+    targetNode.insertAdjacentElement("beforebegin", movingNode);
+  }
+}
+
+function enableCardReorder(article, card) {
+  const dragHandle = article.querySelector(".card-drag-handle");
+  if (!dragHandle) return;
+
+  article.draggable = false;
+  dragHandle.draggable = true;
+
+  dragHandle.addEventListener("dragstart", (event) => {
+    draggingCardId = card.id;
+    article.classList.add("dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.id);
+    }
+  });
+
+  article.addEventListener("dragover", (event) => {
+    if (!draggingCardId || draggingCardId === card.id) return;
+    event.preventDefault();
+    const bounds = article.getBoundingClientRect();
+    const insertAfter = event.clientY > bounds.top + bounds.height / 2;
+    article.classList.toggle("drag-over-before", !insertAfter);
+    article.classList.toggle("drag-over-after", insertAfter);
+  });
+
+  article.addEventListener("dragleave", (event) => {
+    if (!article.contains(event.relatedTarget)) {
+      article.classList.remove("drag-over-before", "drag-over-after");
+    }
+  });
+
+  article.addEventListener("drop", (event) => {
+    if (!draggingCardId || draggingCardId === card.id) return;
+    event.preventDefault();
+    const bounds = article.getBoundingClientRect();
+    const insertAfter = event.clientY > bounds.top + bounds.height / 2;
+    moveCard(draggingCardId, card.id, insertAfter ? "after" : "before");
+    reorderCardDom(draggingCardId, card.id, insertAfter ? "after" : "before");
+    clearDragState();
+  });
+
+  dragHandle.addEventListener("dragend", () => {
+    clearDragState();
+  });
+}
+
 function setFullscreen(cardId) {
   fullscreenCardId = cardId;
   cardElements.forEach((article, id) => {
@@ -228,7 +307,7 @@ async function addCard() {
   const card =
     cardType === "instrument"
       ? { id: crypto.randomUUID(), type: "instrument", instrumentId: newCardInstrumentInput.value, period: "1d", interval: "1d", referenceInstrumentId: "usd" }
-      : { id: crypto.randomUUID(), type: "comparison", instruments: [newCardInstrumentInput.value], period: "1d", interval: "1d", scales: {}, colors: {} };
+      : { id: crypto.randomUUID(), type: "comparison", instruments: [newCardInstrumentInput.value], period: "1d", interval: "1d", scales: {}, colors: {}, showSeriesControls: false };
 
   appState.cards.push(card);
   saveState();
@@ -343,6 +422,7 @@ function buildCardShell(card, title, subtitle) {
         <div class="subtle card-subtitle">${subtitle}</div>
       </div>
       <div class="card-actions">
+        <button class="secondary-button card-drag-handle" type="button" title="Drag to reorder">Drag</button>
         <button class="secondary-button card-fullscreen">Fullscreen</button>
         <button class="secondary-button card-refresh">Reload</button>
         <button class="secondary-button card-delete">Delete</button>
@@ -426,6 +506,9 @@ function createInstrumentCard(card) {
 }
 
 function createComparisonCard(card) {
+  if (typeof card.showSeriesControls !== "boolean") {
+    card.showSeriesControls = false;
+  }
   const article = buildCardShell(card, "Comparison Chart", "Shared time axis with per-series scaling");
   article.insertAdjacentHTML(
     "beforeend",
@@ -449,11 +532,12 @@ function createComparisonCard(card) {
         <div class="check-list comparison-selector"></div>
       </details>
       <div class="chart-toolbar">
+        <button class="secondary-button chart-toggle-controls" type="button">${card.showSeriesControls ? "Hide Controls" : "Show Controls"}</button>
         <button class="secondary-button chart-pan-left" type="button">Left</button>
         <button class="secondary-button chart-pan-right" type="button">Right</button>
       </div>
       <div class="chart-host"></div>
-      <div class="series-list"></div>
+      <div class="series-list ${card.showSeriesControls ? "" : "is-hidden"}"></div>
     `
   );
 
@@ -496,6 +580,12 @@ function createComparisonCard(card) {
       setButtonLoading(button, false, "Auto fit");
     }
   });
+  article.querySelector(".chart-toggle-controls").addEventListener("click", () => {
+    card.showSeriesControls = !card.showSeriesControls;
+    article.querySelector(".series-list").classList.toggle("is-hidden", !card.showSeriesControls);
+    article.querySelector(".chart-toggle-controls").textContent = card.showSeriesControls ? "Hide Controls" : "Show Controls";
+    saveState();
+  });
   article.querySelector(".chart-pan-left").addEventListener("click", () => shiftPlotWindow(article.querySelector(".chart-host"), -1));
   article.querySelector(".chart-pan-right").addEventListener("click", () => shiftPlotWindow(article.querySelector(".chart-host"), 1));
 
@@ -506,6 +596,7 @@ function mountCard(card) {
   const article = card.type === "comparison" ? createComparisonCard(card) : createInstrumentCard(card);
   cardGrid.appendChild(article);
   cardElements.set(card.id, article);
+  enableCardReorder(article, card);
   if (fullscreenCardId) {
     setFullscreen(fullscreenCardId);
   }
